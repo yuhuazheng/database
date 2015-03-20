@@ -1,10 +1,8 @@
 import java.io.BufferedReader;
-import java.io.Console;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Stack;
 
 
@@ -34,19 +32,13 @@ public class SimpleDatabase {
 	}
 	
 	public static void main(String[] args)throws IOException{
-	
-//		Console c = System.console();
-//		if(c==null){
-//			System.err.println("No Console");
-//			System.exit(1);
-//		}
 		
 		try{
 			SimpleDatabase sdb = new SimpleDatabase();
 			BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
 			String curCmd;
 			while((curCmd=br.readLine())!=null){
-				if(!sdb.executeCmd(curCmd)){
+				if(!sdb.executeCmd(curCmd,false)){
 					System.exit(0);
 				}
 			}
@@ -59,7 +51,7 @@ public class SimpleDatabase {
 	//when rollback, pop reverse cmds til meet "begin"
 	//when commit, apply all tran hashmap/set
 	//unset-tran to keep the unset variables in trans
-	private boolean executeCmd(String cmd){ // assume cmd is valid
+	private boolean executeCmd(String cmd, boolean inRollback){ // assume cmd is valid
 		//if not in tran, read and write global hashmaps
 		String[] words = cmd.split(" ");
 		if(words[0].toLowerCase().equals("end")){
@@ -68,7 +60,9 @@ public class SimpleDatabase {
 		
 		else if(words[0].toLowerCase().equals("begin")){
 			inTran=true;
-			cmds_tran.push("begin");
+			if(!inRollback){
+				cmds_tran.push("begin");
+			}
 			return true;
 		}
 		
@@ -76,6 +70,12 @@ public class SimpleDatabase {
 			String k = words[1].toLowerCase();
 			int v = Integer.parseInt(words[2]);
 			if(inTran){
+				if(unsetN_tran.contains(k)){
+					unsetN_tran.remove(k);
+				}
+				if(emptyV_tran.contains(v)){
+					emptyV_tran.remove(v);
+				}
 				boolean existedBeforeTran = false;
 				int v_old=0;
 				//update hashmaps
@@ -104,21 +104,22 @@ public class SimpleDatabase {
 							valueCountMap_tran.put(v_old, c_old-1);
 						}
 					}
-					nameValueMap_tran.put(k, v);
-					if(valueCountMap_tran.containsKey(v)){
-						valueCountMap_tran.put(v, valueCountMap_tran.get(v)+1);
-					}
-					else{
-						valueCountMap.put(v, 1);
-					}
 				}
-				
-				//save the scene
-				if(existedBeforeTran){
-					cmds_tran.push("set "+k+" "+ Integer.toString(v_old));
+				nameValueMap_tran.put(k, v);
+				if(valueCountMap_tran.containsKey(v)){
+					valueCountMap_tran.put(v, valueCountMap_tran.get(v)+1);
 				}
 				else{
-					cmds_tran.push("unset "+k);
+					valueCountMap_tran.put(v, 1);
+				}
+				//save the scene
+				if(!inRollback){
+					if(existedBeforeTran){
+						cmds_tran.push("set "+k+" "+ Integer.toString(v_old));
+					}
+					else{
+						cmds_tran.push("unset "+k);
+					}
 				}
 			}
 			else{
@@ -192,7 +193,9 @@ public class SimpleDatabase {
 					//update unset map
 					unsetN_tran.add(k);
 					//save scene
-					cmds_tran.push("set "+"k "+Integer.toString(tranV));
+					if(!inRollback){
+						cmds_tran.push("set "+k+" "+Integer.toString(tranV));
+					}
 				}
 				else{
 					if(nameValueMap.containsKey(k)){
@@ -218,7 +221,9 @@ public class SimpleDatabase {
 							}
 						}
 						unsetN_tran.add(k);
-						cmds_tran.push("set "+"k "+Integer.toString(tranV));
+						if(!inRollback){
+							cmds_tran.push("set "+"k "+Integer.toString(tranV));
+						}
 					}
 				}
 			}
@@ -272,7 +277,7 @@ public class SimpleDatabase {
 				else{
 					String cd = cmds_tran.pop();
 					while(!cd.toLowerCase().equals("begin")){
-						executeCmd(cd);
+						executeCmd(cd,true);
 						cd=cmds_tran.pop();
 					}
 				}
@@ -287,39 +292,47 @@ public class SimpleDatabase {
 				if(cmds_tran.isEmpty()){
 					System.out.println("NO TRANSACTION");
 				}
-			  else{	
-				//remove unset
-				for(String k : unsetN_tran){
-					int v = nameValueMap.get(k);
-					nameValueMap.remove(k);
-					int c = valueCountMap.get(v);
-					if(c==1){
-						valueCountMap.remove(v);
+				else{	
+					//remove unset
+					for(String k : unsetN_tran){
+						int v = nameValueMap.get(k);
+						nameValueMap.remove(k);
+						int c = valueCountMap.get(v);
+						if(c==1){
+							valueCountMap.remove(v);
+						}
+						else{
+							valueCountMap.put(v, c-1);
+						}
 					}
-					else{
-						valueCountMap.put(v, c-1);
+				    //	update name value in tran
+					for(String k : nameValueMap_tran.keySet()){
+						int v= nameValueMap_tran.get(k);
+						if(nameValueMap.containsKey(k)){
+							int v_old = nameValueMap.get(k);
+							int c_old = valueCountMap.get(v_old);
+							if(c_old==1){
+								valueCountMap.remove(v_old);
+							}
+							else{
+								valueCountMap.put(v_old, c_old-1);
+							}
+						}
+						nameValueMap.put(k, v);
+						if(valueCountMap.containsKey(v)){
+							valueCountMap.put(v, valueCountMap.get(v)+1);
+						}
+						else{
+							valueCountMap.put(v, 1);
+						}
 					}
+					//clean tran maps
+					cmds_tran.clear();
+					nameValueMap_tran.clear();
+					valueCountMap_tran.clear();
+					emptyV_tran.clear();
+					unsetN_tran.clear();
 				}
-				//update name value in tran
-				for(String k : nameValueMap_tran.keySet()){
-					int v= nameValueMap_tran.get(k);
-					int v_old = nameValueMap.get(k);
-					nameValueMap.put(k, v);
-					int c_old = valueCountMap.get(v_old);
-					if(c_old==1){
-						valueCountMap.remove(v_old);
-					}
-					else{
-						valueCountMap.put(v_old, c_old-1);
-					}
-					if(valueCountMap.containsKey(v)){
-						valueCountMap.put(v, valueCountMap.get(v)+1);
-					}
-					else{
-						valueCountMap.put(v, 1);
-					}
-				}
-			  }
 			}
 			else{
 				System.out.println("NO TRANSACTION");
