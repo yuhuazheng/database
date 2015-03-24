@@ -1,0 +1,15 @@
+set a 10
+get a
+begin
+set a 20
+get a
+numequalto 10
+numequalto 20
+rollback
+begin
+unset a
+begin
+set a 30
+commit
+end
+

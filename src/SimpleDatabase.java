@@ -39,9 +39,11 @@ public class SimpleDatabase {
 			String curCmd;
 			while((curCmd=br.readLine())!=null){
 				if(!sdb.executeCmd(curCmd,false)){
+					br.close();
 					System.exit(0);
 				}
 			}
+			br.close();
 		}catch(IOException io){
 			io.printStackTrace();
 		}
@@ -51,16 +53,16 @@ public class SimpleDatabase {
 	//when rollback, pop reverse cmds til meet "begin"
 	//when commit, apply all tran hashmap/set
 	//unset-tran to keep the unset variables in trans
-	private boolean executeCmd(String cmd, boolean inRollback){ // assume cmd is valid
-		//if not in tran, read and write global hashmaps
+	public boolean executeCmd(String cmd, boolean inRollback){
+		
 		String[] words = cmd.split(" ");
 		if(words[0].toLowerCase().equals("end")){
 			return false;
 		}
 		
 		else if(words[0].toLowerCase().equals("begin")){
-			inTran=true;
 			if(!inRollback){
+				inTran=true;
 				cmds_tran.push("begin");
 			}
 			return true;
@@ -70,49 +72,59 @@ public class SimpleDatabase {
 			String k = words[1].toLowerCase();
 			int v = Integer.parseInt(words[2]);
 			if(inTran){
-				if(unsetN_tran.contains(k)){
-					unsetN_tran.remove(k);
-				}
-				if(emptyV_tran.contains(v)){
-					emptyV_tran.remove(v);
-				}
 				boolean existedBeforeTran = false;
 				int v_old=0;
-				//update hashmaps
+				//name existed in tran maps
 				if(nameValueMap_tran.containsKey(k)){
 					existedBeforeTran=true;
 					v_old = nameValueMap_tran.get(k);
 					int c_old = valueCountMap_tran.get(v_old);
 					if(c_old==1){
 						valueCountMap_tran.remove(v_old);
+						emptyV_tran.add(v_old);
 					}
 					else{
 						valueCountMap_tran.put(v_old, c_old-1);
 					}
 				}
 				else{
-					//inherit value_count info from main maps
+					//inherit from normal maps
 					if(nameValueMap.containsKey(k)){
 						//value count need to update
 						existedBeforeTran=true;
 						v_old = nameValueMap.get(k);
 						int c_old = valueCountMap.get(v_old);
 						if(c_old==1){
-							valueCountMap_tran.put(v_old, 0);
+							//valueCountMap_tran.put(v_old, 0);
+							emptyV_tran.add(v_old);
 						}
 						else{
 							valueCountMap_tran.put(v_old, c_old-1);
 						}
 					}
 				}
+				//update tran maps with new value
 				nameValueMap_tran.put(k, v);
 				if(valueCountMap_tran.containsKey(v)){
 					valueCountMap_tran.put(v, valueCountMap_tran.get(v)+1);
 				}
 				else{
-					valueCountMap_tran.put(v, 1);
+					if(valueCountMap.containsKey(v)){
+						valueCountMap_tran.put(v,valueCountMap.get(v)+1);
+					}
+					else{
+						valueCountMap_tran.put(v, 1);
+					}
 				}
-				//save the scene
+				//handle in previous tran, the name is unset
+				if(unsetN_tran.contains(k)){
+					unsetN_tran.remove(k);
+					existedBeforeTran=false;
+				}
+				if(emptyV_tran.contains(v)){
+					emptyV_tran.remove(v);
+				}
+				//save the scene with reverse command: set name with old value; or unset name with new value
 				if(!inRollback){
 					if(existedBeforeTran){
 						cmds_tran.push("set "+k+" "+ Integer.toString(v_old));
@@ -122,6 +134,7 @@ public class SimpleDatabase {
 					}
 				}
 			}
+			//in normal mode
 			else{
 				if(nameValueMap.containsKey(k)){
 					int v_old = nameValueMap.get(k);
@@ -175,7 +188,8 @@ public class SimpleDatabase {
 			String k = words[1].toLowerCase();
 			if(inTran){
 				if(unsetN_tran.contains(k)){
-					//
+					//if the name has been unset in trans, do nothing.
+					;
 				}
 				else if(nameValueMap_tran.containsKey(k)){
 					//update name_value
@@ -222,7 +236,7 @@ public class SimpleDatabase {
 						}
 						unsetN_tran.add(k);
 						if(!inRollback){
-							cmds_tran.push("set "+"k "+Integer.toString(tranV));
+							cmds_tran.push("set "+k+" "+Integer.toString(tranV));
 						}
 					}
 				}
